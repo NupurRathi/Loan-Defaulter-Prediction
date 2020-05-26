@@ -1,0 +1,234 @@
+```{r}
+
+setwd("C:/Users/Nupur Rathi/Desktop/Assignments PGBABi/Projects/Cart and Random Forest Project")
+#Reading data
+library(readxl)
+bankData<-read_excel("Thera Bank-Data Set.xlsx",2)
+
+```
+
+#Converting type of variables
+```{r}
+bankData$Education<-as.factor(bankData$Education)
+bankData$`Personal Loan`<-as.factor(bankData$`Personal Loan`)
+bankData$`Securities Account`<-as.factor(bankData$`Securities Account`)
+bankData$`CD Account`<-as.factor(bankData$`CD Account`)
+bankData$Online<-as.factor(bankData$Online)
+bankData$CreditCard<-as.factor(bankData$CreditCard)
+bankData$`Family members`<-as.factor(bankData$`Family members`)
+bankData$`ZIP Code`<-as.factor(bankData$`ZIP Code`)
+
+str(bankData)
+#check for any duplicate rows
+any(duplicated(bankData))
+
+#change name of colmns : Different ways to  change column name
+# we can trim all col names
+names(bankData)<-gsub("\\s","_",names(bankData)) #subsitutes space by underscore
+colnames(bankData)
+```
+
+
+```{r}
+
+names(bankData)
+#Data Cleaning 
+"
+1.Experience in years : has negative values.
+2.Missing values in FamilyMembers.
+3.Remove Unnecessary variables which cant help us in prediction like 'Id'
+4.Income_(in_K_per_month has outliers.
+5.average spending on credit card has many outliers:CCAvg
+
+"
+library(dplyr)
+
+bankData %>%
+  filter(is.na(bankData$Family_members))
+
+bankData %>%
+  filter(bankData$`Experience_(in_years)`<0)
+#Conclude: There are 52 rows where experience is negative : Exp cant be negative # so we will mutate as abs value of exp : considering it to be typing err
+
+bankData$`Experience_(in_years)`=abs(bankData$`Experience_(in_years)`)
+bankData<-bankData[,-c(1,5)]
+
+
+```
+```{r}
+"
+For Missing values in FamilyMembers.lets build a model to predict the family members for given data" 
+
+
+"For now , just mutate it as 1 : considering they are single person"
+bankData[is.na(bankData$Family_members),"Family_members"]<- 1
+
+#check if missing value got replaced.
+colSums(is.na(bankData))
+
+```
+
+
+#Splitting the data into test and traindata
+```{r}
+
+library(caTools)
+
+set.seed(127)
+
+split=sample.split(bankData$Personal_Loan ,SplitRatio = 0.7)
+head(bankData)
+trData<-subset(bankData,split==TRUE)
+tstData<-subset(bankData,split==FALSE)
+
+#Check if the proportions of levels of PersonalLoan is same in test and train data to avoid baising
+prop.table(table(trData$Personal_Loan))
+prop.table(table(tstData$Personal_Loan))
+```
+
+
+
+#Step1: Trying to find best mtry by gridsearch
+```{r}
+#finding mtry
+library(caret)
+metric1="Accuracy"
+tunegrid1 <- expand.grid(.mtry=c(1:12))
+control=trainControl(search = "grid")
+rf_gridsearch<-train(Personal_Loan~., data = trData, method ="rf",metric= metric1, tuneGrid =tunegrid1,trControl=control,ntree=500)
+print(rf_gridsearch)
+plot(rf_gridsearch,metric="Accuracy")
+plot(rf_gridsearch,metric="Kappa")
+```
+
+
+```{r}
+library(randomForest)
+set.seed(127)
+trData$predict.class=NULL
+trData$predict.score=NULL
+tstData$predict.class=NULL
+tstData$predict.score=NULL
+attach(trData)
+rf2<-randomForest(Personal_Loan~., data=trData,ntree=500,mtry=4,importance=TRUE)
+rf2
+```
+
+#For Bringing down the false negative: we changed cutoff to 70:30
+```{r}
+
+head(trData)
+set.seed(420)
+library(randomForest)
+rf3<-randomForest(Personal_Loan ~ ., data=trData,ntree=500,mtry=4,importance=TRUE,cutoff=c(0.7,0.3))
+rf3
+
+```
+
+
+#Plot Random Forest Tree
+```{r}
+require(randomForest)
+k <- 100
+getTree(randomForest(Personal_Loan ~ ., data=trData,ntree=500,mtry=4,importance=TRUE,cutoff=c(0.7,0.3)), k, labelVar = TRUE)
+
+```
+
+
+
+
+
+
+
+#Prediction for train data
+```{r}
+trData$predict.class=NULL
+trData$predict.score=NULL
+
+trData$predicted.class<-predict(rf3,trData,type="class")
+trData$predicted.score<-predict(rf3,trData)
+
+cfMatrix1<-table(trData$Personal_Loan,trData$predicted.class)
+trueNegative<-cfMatrix1[1,1]
+falsePositive<-cfMatrix1[1,2]
+falseNegative<-cfMatrix1[2,1]
+truePositive<-cfMatrix1[2,2]
+
+cfMatrix1
+```
+
+
+#Performance Measure for train Data
+
+```{r}
+sensetivityrf_tr=truePositive/(truePositive+falseNegative)
+sprintf("Senstivity: %s", sensetivityrf_tr)
+specificityrf_tr=trueNegative/(trueNegative+falsePositive)
+sprintf("Specificity: %s", specificityrf_tr)
+accuracyrf_tr=(truePositive+trueNegative)/(truePositive+trueNegative+falsePositive+falseNegative)
+sprintf("Accuracy: %s", accuracyrf_tr)
+```
+
+#Prediction for train Data
+
+```{r}
+tstData$predicted.class<-NULL
+tstData$predicted.score=NULL
+head(tstData)
+tstData$predicted.class<-predict(rf3,tstData,type="class")
+tstData$predicted.score<-predict(rf3,tstData)
+cfMatrix1_tst<-table(tstData$Personal_Loan,tstData$predicted.class)
+trueNegative1_tst<-cfMatrix1_tst[1,1]
+falsePositive1_tst<-cfMatrix1_tst[1,2]
+falseNegative1_tst<-cfMatrix1_tst[2,1]
+truePositive1_tst<-cfMatrix1_tst[2,2]
+cfMatrix1_tst
+```
+
+
+
+
+
+#Performance Measure for test Data
+
+```{r}
+sensetivityrf_test=truePositive1_tst/(truePositive1_tst+falseNegative1_tst)
+sprintf("Senstivity: %s", sensetivityrf_test)
+specificityrf_test=trueNegative1_tst/(trueNegative1_tst+falsePositive1_tst)
+sprintf("Specificity: %s", specificityrf_test)
+accuracyrf_test=(truePositive1_tst+trueNegative1_tst)/(truePositive1_tst+trueNegative1_tst+falsePositive1_tst+falseNegative1_tst)
+sprintf("Accuracy: %s", accuracyrf_test)
+```
+#Model Performance of Test and Train
+```{r}
+df_results_train = data.frame(accuracyrf_tr, sensetivityrf_tr, specificityrf_tr)
+names(df_results_train) = c("ACC", "SENS", "SPEC")
+df_results_test = data.frame(accuracyrf_test, sensetivityrf_test, specificityrf_test)
+names(df_results_test) = c("ACC", "SENS", "SPEC")
+
+?rbind
+df_fin =rbind(df_results_train, df_results_test)
+row.names(df_fin) = c('tree_full_train', 'tree_full_test')
+df_fin
+```
+
+
+#Calculating AUC with best model(rf3)
+
+```{r}
+
+trData$predicted.class=predict(rf3,trData,type="class")
+trData$predicted.score=predict(rf3,trData,type="prob")
+tstData$predicted.score=predict(rf3,tstData,type="prob")
+```
+
+
+```{r}
+library(pROC)
+roc_obj_rf1 = roc(trData$Personal_Loan, trData$predicted.score[,2])
+plot(roc_obj_rf1, print.auc = T)
+roc_obj_rf2 = roc(tstData$Personal_Loan, tstData$predicted.score[,2])
+plot(roc_obj_rf2, print.auc = T)
+```
+
+
